@@ -24,10 +24,31 @@
 
     <div class="header-group">
       <label class="field">
+        <span class="field-label">Hand</span>
+        <select id="handSelect" aria-label="Hand">
+          <option value="Left">Left</option>
+          <option value="Right" selected>Right</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Finger</span>
+        <select id="fingerSelect" aria-label="Finger">
+          <option>Thumb</option>
+          <option selected>Index</option>
+          <option>Middle</option>
+          <option>Ring</option>
+          <option>Little</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="header-group">
+      <label class="field">
         <span class="field-label">Mode</span>
         <select id="modeSelect" aria-label="Mode">
           <option value="tap">Tap Analysis</option>
           <option value="accuracy">Accuracy</option>
+          <option value="test">Finger Test</option>
           <option value="calibration">Calibration</option>
         </select>
       </label>
@@ -45,6 +66,10 @@
     <section class="canvas-wrap" aria-label="Tap target area">
       <canvas id="board"></canvas>
       <p id="modeHint" class="mode-hint"></p>
+      <div id="testOverlay" class="test-overlay" hidden>
+        <p id="testOverlayText"></p>
+        <button id="testContinueBtn" class="btn btn-primary">Continue</button>
+      </div>
     </section>
 
     <!-- Middle column: live analysis viz + always-visible taps table -->
@@ -105,6 +130,39 @@
           <button id="calSaveBtn" class="btn btn-accent" disabled>Save calibration</button>
           <button id="calClearBtn" class="btn btn-ghost">Clear</button>
         </div>
+      </div>
+
+      <!-- Finger test panel (only shown in test mode) -->
+      <div class="panel" id="testPanel" hidden>
+        <h2 class="panel-title">Finger Test</h2>
+        <p class="muted small">Pick fingers, set taps each, then Start. You'll tap the dot for each finger in turn; results compare accuracy + precision.</p>
+        <label class="field">
+          <span class="field-label">Taps per finger</span>
+          <input id="tapsPer" type="number" min="1" max="100" value="10" />
+        </label>
+        <div class="finger-grid" id="fingerGrid"></div>
+        <div class="controls">
+          <button id="startTestBtn" class="btn btn-primary">Start test</button>
+          <button id="cancelTestBtn" class="btn btn-ghost" disabled>Cancel</button>
+        </div>
+        <p id="testStatus" class="session-status">Not started</p>
+      </div>
+
+      <!-- Comparison across fingers/hands -->
+      <div class="panel">
+        <h2 class="panel-title">Compare fingers</h2>
+        <label class="field">
+          <span class="field-label">Metric</span>
+          <select id="compareMetric" aria-label="Comparison metric">
+            <option value="acc">Accuracy % (higher better)</option>
+            <option value="prec">Precision: spread px (lower better)</option>
+            <option value="off">Offset px (lower better)</option>
+            <option value="hard">Hardness %</option>
+            <option value="ms">Contact ms</option>
+          </select>
+        </label>
+        <div class="chart-box"><canvas id="compareChart"></canvas></div>
+        <p id="compareEmpty" class="muted small">Save sessions tagged with hand + finger to compare.</p>
       </div>
 
       <!-- Live charts -->

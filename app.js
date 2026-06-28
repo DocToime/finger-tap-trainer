@@ -21,6 +21,14 @@
     targetField: $('targetField'),
     targetRadius: $('targetRadius'),
     targetVal: $('targetVal'),
+    handSelect: $('handSelect'),
+    fingerSelect: $('fingerSelect'),
+    // finger test
+    testPanel: $('testPanel'), tapsPer: $('tapsPer'), fingerGrid: $('fingerGrid'),
+    startTestBtn: $('startTestBtn'), cancelTestBtn: $('cancelTestBtn'), testStatus: $('testStatus'),
+    testOverlay: $('testOverlay'), testOverlayText: $('testOverlayText'), testContinueBtn: $('testContinueBtn'),
+    // compare
+    compareMetric: $('compareMetric'), compareEmpty: $('compareEmpty'),
     // live cards
     mTaps: $('mTaps'), mArea: $('mArea'), mHardness: $('mHardness'),
     mContact: $('mContact'), mAccuracy: $('mAccuracy'), mOffset: $('mOffset'),
@@ -70,14 +78,22 @@
 
   // ---------- Runtime state ----------
   const state = {
-    mode: 'tap',          // tap | accuracy | calibration
+    mode: 'tap',          // tap | accuracy | test | calibration
     running: false,
     paused: false,
     taps: [],             // current session taps
     showAll: false,
     active: null,         // in-progress tap being sampled
     calPresses: [],       // calibration presses (areas)
+    hand: 'Right',        // tag for saved sessions
+    finger: 'Index',
+    test: null,           // guided finger-test run (see startTest)
   };
+
+  const FINGERS = ['Thumb', 'Index', 'Middle', 'Ring', 'Little'];
+  const HANDS = ['Left', 'Right'];
+  // accuracy-like modes draw the dot + score offset/accuracy/precision
+  function accLike() { return state.mode === 'accuracy' || state.mode === 'test'; }
 
   // ---------- Geometry ----------
   let dpr = 1, box = null, dot = null;
@@ -97,7 +113,7 @@
     dot = { x: box.x + box.width / 2, y: box.y + box.height / 2, r: 14 };
     draw();
     layoutAnalysis();
-    if (state.mode === 'accuracy') syncTargetSlider();
+    if (accLike()) syncTargetSlider();
   }
 
   function layoutAnalysis() {
@@ -163,13 +179,13 @@
     ctx.textAlign = 'left';
     const label = state.mode === 'calibration'
       ? 'Press AS HARD AS YOU CAN inside this box'
-      : state.mode === 'accuracy'
+      : accLike()
         ? 'Tap the dot as accurately as you can'
         : 'Tap anywhere inside this box';
     ctx.fillText(label, box.x + 12, box.y + 22);
 
     // accuracy dot
-    if (state.mode === 'accuracy') {
+    if (accLike()) {
       // configurable target radius ring (0% accuracy boundary)
       const tr = getTargetRadius();
       ctx.setLineDash([6, 6]);
@@ -241,7 +257,7 @@
   function drawAnalysis() {
     if (!aW) return;
     actx.clearRect(0, 0, aW, aH);
-    if (state.mode === 'accuracy') drawTargetViz();
+    if (accLike()) drawTargetViz();
     else if (state.mode === 'calibration') drawCalibViz();
     else drawTapViz();
   }
@@ -352,8 +368,14 @@
   }
   function ellipseArea(w, h) { return Math.PI * (w / 2) * (h / 2); }
 
+  function canCapture() {
+    if (state.mode === 'calibration') return true;
+    if (state.mode === 'test') return state.test && state.test.phase === 'running';
+    return state.running && !state.paused;
+  }
+
   function onDown(e) {
-    if (state.mode !== 'calibration' && (!state.running || state.paused)) return;
+    if (!canCapture()) return;
     const p = pos(e);
     if (!inBox(p.x, p.y)) return;
     if (activePointerId !== null) return; // single-touch only (v1)
@@ -405,7 +427,7 @@
       offset: null, accuracyPct: null,
     };
 
-    if (state.mode === 'accuracy') {
+    if (accLike()) {
       const dx = t.x - dot.x, dy = t.y - dot.y;
       tap.offset = Math.hypot(dx, dy);
       tap.accuracyPct = clamp(100 * (1 - tap.offset / getTargetRadius()), 0, 100);
@@ -424,6 +446,7 @@
       updateLive(tap);
       pushCharts();
       renderTable();
+      if (state.mode === 'test') handleTestTap();
     }
     draw();
     drawAnalysis();
@@ -486,7 +509,7 @@
   }
 
   // ---------- Charts ----------
-  let areaChart, timeChart, scatterChart, offsetChart, progressChart;
+  let areaChart, timeChart, scatterChart, offsetChart, progressChart, compareChart;
   const chartFont = { color: '#8b98a5' };
   const grid = { color: 'rgba(255,255,255,0.06)' };
 
@@ -550,7 +573,48 @@
         },
       },
     });
+    compareChart = new Chart($('compareChart'), {
+      type: 'bar',
+      data: { labels: [], datasets: [{ label: '', data: [], backgroundColor: [] }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: true } },
+        scales: { x: { ticks: chartFont, grid }, y: { ticks: chartFont, grid, beginAtZero: true } },
+      },
+    });
     renderProgress();
+    renderCompare();
+  }
+
+  // ---------- Comparison across fingers/hands ----------
+  function metricVal(sum, m) {
+    return m === 'acc' ? sum.avgAccuracy
+      : m === 'prec' ? sum.precision
+      : m === 'off' ? sum.avgOffset
+      : m === 'hard' ? sum.avgHardness
+      : sum.avgContactMs;
+  }
+  function renderCompare() {
+    const m = els.compareMetric.value;
+    const groups = {};
+    for (const s of activeProfile().sessions) {
+      if (!s.hand || !s.finger) continue;
+      const v = metricVal(s.summary, m);
+      if (v == null) continue;
+      const k = `${s.hand[0]} ${s.finger}`; // e.g. "R Index"
+      (groups[k] ||= { sum: 0, n: 0, hand: s.hand, finger: s.finger });
+      groups[k].sum += v; groups[k].n++;
+    }
+    const keys = Object.keys(groups).sort((a, b) => {
+      const ga = groups[a], gb = groups[b];
+      if (ga.hand !== gb.hand) return ga.hand < gb.hand ? -1 : 1;
+      return FINGERS.indexOf(ga.finger) - FINGERS.indexOf(gb.finger);
+    });
+    compareChart.data.labels = keys;
+    compareChart.data.datasets[0].data = keys.map(k => round1(groups[k].sum / groups[k].n));
+    compareChart.data.datasets[0].backgroundColor = keys.map(k => groups[k].hand === 'Right' ? '#2f81f7' : '#2ea043');
+    compareChart.update();
+    els.compareEmpty.hidden = keys.length > 0;
   }
 
   function pushCharts() {
@@ -561,7 +625,7 @@
     timeChart.data.labels.push(t.id);
     timeChart.data.datasets[0].data.push(t.contactMs);
     timeChart.update();
-    if (state.mode === 'accuracy') {
+    if (accLike()) {
       // demote the prior "latest" point into the previous-taps dataset
       const prevLatest = scatterChart.data.datasets[1].data[0];
       if (prevLatest) scatterChart.data.datasets[0].data.push(prevLatest);
@@ -649,12 +713,24 @@
     const accs = taps.filter(t => t.accuracyPct != null).map(t => t.accuracyPct);
     const hards = taps.filter(t => t.areaNorm != null).map(t => t.areaNorm * 100);
     const offs = taps.filter(t => t.offset != null).map(t => t.offset);
+    // Precision = spread of the targeted taps around their OWN centroid (px),
+    // independent of where the target was. Lower = more consistent/repeatable.
+    const pts = taps.filter(t => t.offset != null);
+    let precision = null;
+    if (pts.length > 1) {
+      const cxp = mean(pts.map(p => p.x)), cyp = mean(pts.map(p => p.y));
+      precision = round1(mean(pts.map(p => Math.hypot(p.x - cxp, p.y - cyp))));
+    } else if (pts.length === 1) {
+      precision = 0;
+    }
     return {
       count: taps.length,
       avgArea: round1(mean(areas)), stdArea: round1(std(areas)),
       avgContactMs: round1(mean(times)), stdContactMs: round1(std(times)),
       avgAccuracy: accs.length ? round1(mean(accs)) : null,
+      stdAccuracy: accs.length ? round1(std(accs)) : null,
       avgOffset: offs.length ? round1(mean(offs)) : null,
+      precision,
       avgHardness: hards.length ? round1(mean(hards)) : null,
       stdHardness: hards.length ? round1(std(hards)) : null,
     };
@@ -677,18 +753,22 @@
     els.pauseBtn.textContent = state.paused ? 'Resume' : 'Pause';
     setStatus(state.paused ? 'Paused' : 'Recording…');
   }
-  function saveSession() {
-    if (!state.taps.length) { resetSession(); return; }
+  function commitSession(taps, mode, hand, finger) {
     const session = {
-      id: uid(), profileId: store.activeProfileId, mode: state.mode,
-      startedAt: new Date(state.taps[0].downTs + performance.timeOrigin).toISOString(),
+      id: uid(), profileId: store.activeProfileId, mode, hand, finger,
+      startedAt: new Date(taps[0].downTs + performance.timeOrigin).toISOString(),
       endedAt: new Date().toISOString(),
-      taps: state.taps, summary: summarize(state.taps),
+      taps, summary: summarize(taps),
     };
     activeProfile().sessions.push(session);
     saveStore();
-    renderProgress();
-    setStatus(`Saved: ${session.summary.count} taps`);
+    return session;
+  }
+  function saveSession() {
+    if (!state.taps.length) { resetSession(); return; }
+    const session = commitSession(state.taps, state.mode, state.hand, state.finger);
+    renderProgress(); renderCompare();
+    setStatus(`Saved: ${session.summary.count} taps (${state.hand} ${state.finger})`);
     resetSession();
   }
   function resetSession() {
@@ -703,22 +783,152 @@
     });
   }
 
+  // ---------- Finger test (guided, multi-finger) ----------
+  function buildFingerGrid() {
+    els.fingerGrid.innerHTML = '';
+    for (const hand of HANDS) {
+      const col = document.createElement('div');
+      col.className = 'finger-col';
+      const h = document.createElement('div');
+      h.className = 'finger-col-h'; h.textContent = hand;
+      col.appendChild(h);
+      for (const f of FINGERS) {
+        const lab = document.createElement('label');
+        lab.className = 'finger-chk';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.id = `chk-${hand}-${f}`;
+        if (f === 'Index') cb.checked = true; // default: both index fingers
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(' ' + f));
+        col.appendChild(lab);
+      }
+      els.fingerGrid.appendChild(col);
+    }
+  }
+  function getTestSeq() {
+    const seq = [];
+    for (const hand of HANDS) for (const f of FINGERS) {
+      const cb = $(`chk-${hand}-${f}`);
+      if (cb && cb.checked) seq.push({ hand, finger: f });
+    }
+    return seq;
+  }
+  function setTestInputsDisabled(d) {
+    els.fingerGrid.querySelectorAll('input').forEach(cb => { cb.disabled = d; });
+    els.tapsPer.disabled = d;
+  }
+  function endTestUI() {
+    setTestInputsDisabled(false);
+    els.startTestBtn.disabled = false;
+    els.cancelTestBtn.disabled = true;
+  }
+  function updateTestStatus() {
+    const T = state.test;
+    if (!T) { els.testStatus.textContent = 'Not started'; els.modeHint.textContent = ''; return; }
+    if (T.phase === 'running') {
+      const cur = T.seq[T.idx];
+      const txt = `${cur.hand} ${cur.finger} — ${T.count}/${T.tapsPer} (finger ${T.idx + 1}/${T.seq.length})`;
+      els.testStatus.textContent = txt;
+      els.modeHint.textContent = txt;
+    } else if (T.phase === 'between') {
+      els.testStatus.textContent = `Waiting — finger ${T.idx + 1}/${T.seq.length}`;
+      els.modeHint.textContent = '';
+    } else {
+      els.testStatus.textContent = 'Complete';
+      els.modeHint.textContent = '';
+    }
+  }
+  function startTest() {
+    const seq = getTestSeq();
+    if (!seq.length) { els.testStatus.textContent = 'Select at least one finger.'; return; }
+    const tapsPer = clamp(parseInt(els.tapsPer.value, 10) || 10, 1, 100);
+    state.test = { seq, tapsPer, idx: 0, count: 0, phase: 'between' };
+    state.taps = []; resetCharts(); renderTable();
+    setTestInputsDisabled(true);
+    els.startTestBtn.disabled = true; els.cancelTestBtn.disabled = false;
+    const first = seq[0];
+    els.testOverlayText.textContent = `Ready: ${first.hand} ${first.finger} — ${tapsPer} taps. Press Continue to begin.`;
+    els.testOverlay.hidden = false;
+    updateTestStatus();
+  }
+  function testContinue() {
+    const T = state.test;
+    if (!T) { els.testOverlay.hidden = true; return; }
+    if (T.phase === 'done' || T.idx >= T.seq.length) { els.testOverlay.hidden = true; endTestUI(); return; }
+    const cur = T.seq[T.idx];
+    state.hand = cur.hand; state.finger = cur.finger;
+    els.handSelect.value = cur.hand; els.fingerSelect.value = cur.finger;
+    state.taps = []; resetCharts(); renderTable();
+    T.count = 0; T.phase = 'running';
+    els.testOverlay.hidden = true;
+    updateTestStatus();
+    draw(); drawAnalysis();
+  }
+  function handleTestTap() {
+    const T = state.test;
+    if (!T) return;
+    T.count++;
+    updateTestStatus();
+    if (T.count >= T.tapsPer) finishFinger();
+  }
+  function finishFinger() {
+    const T = state.test;
+    const cur = T.seq[T.idx];
+    if (state.taps.length) { commitSession(state.taps, 'test', cur.hand, cur.finger); renderProgress(); renderCompare(); }
+    T.idx++;
+    if (T.idx >= T.seq.length) { finishTest(); return; }
+    T.phase = 'between';
+    const nxt = T.seq[T.idx];
+    els.testOverlayText.textContent = `Done. Next: ${nxt.hand} ${nxt.finger} — ${T.tapsPer} taps. Switch fingers, then press Continue.`;
+    els.testOverlay.hidden = false;
+    updateTestStatus();
+  }
+  function finishTest() {
+    state.test.phase = 'done';
+    endTestUI();
+    els.compareMetric.value = 'acc';
+    renderCompare();
+    els.testOverlayText.textContent = 'Test complete! Compare accuracy & precision below — switch the metric to see each.';
+    els.testOverlay.hidden = false;
+    els.modeHint.textContent = '';
+    els.testStatus.textContent = 'Complete';
+  }
+  function cancelTest() {
+    if (!state.test) return;
+    state.test = null;
+    els.testOverlay.hidden = true;
+    endTestUI();
+    els.testStatus.textContent = 'Not started';
+    els.modeHint.textContent = '';
+  }
+
   // ---------- Mode switching ----------
   function setMode(mode) {
+    cancelTest(); // leaving any in-progress test
     state.mode = mode;
     const calMode = mode === 'calibration';
-    const accMode = mode === 'accuracy';
+    const testMode = mode === 'test';
+    const acc = accLike(); // accuracy or test
     els.calPanel.hidden = !calMode;
-    els.scatterBox.hidden = !accMode;
-    els.offsetBox.hidden = !accMode;
-    els.cardAccuracy.style.display = accMode ? '' : 'none';
-    els.cardOffset.style.display = accMode ? '' : 'none';
-    els.analysisTitle.textContent = accMode ? 'Live accuracy' : calMode ? 'Calibration' : 'Live tap';
-    els.targetField.hidden = !accMode;
-    if (accMode) syncTargetSlider();
-    // calibration uses its own flow, not start/stop session
-    els.startBtn.disabled = calMode || state.running;
-    if (calMode) { clearCalibration(); resetSession(); }
+    els.testPanel.hidden = !testMode;
+    els.scatterBox.hidden = !acc;
+    els.offsetBox.hidden = !acc;
+    els.cardAccuracy.style.display = acc ? '' : 'none';
+    els.cardOffset.style.display = acc ? '' : 'none';
+    els.analysisTitle.textContent = acc ? 'Live accuracy' : calMode ? 'Calibration' : 'Live tap';
+    els.targetField.hidden = !acc;
+    els.modeHint.textContent = '';
+    if (acc) syncTargetSlider();
+    // calibration & test use their own flows, not the Start/Save session controls
+    const normalSession = !calMode && !testMode;
+    resetSession();
+    els.startBtn.disabled = !normalSession;
+    els.pauseBtn.disabled = true;
+    els.saveBtn.disabled = true;
+    if (calMode) clearCalibration();
+    // tap/accuracy auto-record; test waits for Start test
+    if (normalSession) startSession();
     draw();
     drawAnalysis();
   }
@@ -735,7 +945,7 @@
   }
   function switchProfile(id) {
     store.activeProfileId = id; saveStore();
-    resetSession(); refreshCalBadge(); renderProgress();
+    resetSession(); refreshCalBadge(); renderProgress(); renderCompare();
   }
 
   // ---------- Export ----------
@@ -821,6 +1031,18 @@
     // accuracy target radius
     els.targetRadius.addEventListener('input', onTargetChange);
 
+    // hand / finger tagging
+    els.handSelect.addEventListener('change', (e) => { state.hand = e.target.value; store.lastHand = state.hand; saveStore(); });
+    els.fingerSelect.addEventListener('change', (e) => { state.finger = e.target.value; store.lastFinger = state.finger; saveStore(); });
+
+    // finger test
+    els.startTestBtn.addEventListener('click', startTest);
+    els.cancelTestBtn.addEventListener('click', () => { cancelTest(); state.taps = []; resetCharts(); renderTable(); draw(); drawAnalysis(); });
+    els.testContinueBtn.addEventListener('click', testContinue);
+
+    // comparison metric
+    els.compareMetric.addEventListener('change', renderCompare);
+
     // mode / profile
     els.modeSelect.addEventListener('change', (e) => setMode(e.target.value));
     els.profileSelect.addEventListener('change', (e) => switchProfile(e.target.value));
@@ -860,13 +1082,17 @@
   function init() {
     renderProfiles();
     refreshCalBadge();
+    state.hand = store.lastHand || 'Right';
+    state.finger = store.lastFinger || 'Index';
+    els.handSelect.value = state.hand;
+    els.fingerSelect.value = state.finger;
+    buildFingerGrid();
     layout();
     initCharts();
-    setMode('tap');
     bind();
+    setMode('tap'); // auto-starts a recording session (no Start needed)
     capabilityNote();
     requestAnimationFrame(tick);
-    startSession(); // auto-start: no need to press Start
   }
 
   if (document.readyState === 'loading') {
