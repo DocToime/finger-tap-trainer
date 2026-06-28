@@ -187,19 +187,21 @@
         <p id="progressEmpty" class="muted small">No saved sessions yet for this profile.</p>
       </div>
 
+      <!-- Data & export (collapsed by default) -->
+      <details class="panel export-panel">
+        <summary>Data &amp; export</summary>
+        <div class="export-actions">
+          <button id="exportCsvBtn" class="btn btn-ghost btn-xs">Export CSV</button>
+          <button id="exportJsonBtn" class="btn btn-ghost btn-xs">Export JSON</button>
+          <button id="copyBtn" class="btn btn-ghost btn-xs">Copy metrics</button>
+          <button id="exportProfileBtn" class="btn btn-ghost btn-xs">Export profile</button>
+          <button id="importProfileBtn" class="btn btn-ghost btn-xs">Import profile</button>
+          <input id="importFile" type="file" accept="application/json" hidden />
+        </div>
+        <p class="muted small" id="capNote"></p>
+      </details>
+
     </aside>
   </main>
-
-  <footer class="app-footer">
-    <span class="muted small" id="capNote"></span>
-    <div class="footer-actions">
-      <button id="exportCsvBtn" class="btn btn-ghost btn-xs">Export CSV</button>
-      <button id="exportJsonBtn" class="btn btn-ghost btn-xs">Export JSON</button>
-      <button id="copyBtn" class="btn btn-ghost btn-xs">Copy metrics</button>
-      <button id="exportProfileBtn" class="btn btn-ghost btn-xs">Export profile</button>
-      <button id="importProfileBtn" class="btn btn-ghost btn-xs">Import profile</button>
-      <input id="importFile" type="file" accept="application/json" hidden />
-    </div>
-  </footer>
 </body>
 </html>
