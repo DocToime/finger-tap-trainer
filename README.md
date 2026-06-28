@@ -65,7 +65,7 @@ A structured test that walks you through several fingers in turn and then compar
 2. A prompt appears: *"Ready: Right Index — 10 taps. Press Continue to begin."*
 3. Tap the dot the required number of times (an on-screen counter tracks progress).
 4. When done, you're prompted to switch fingers and press **Continue** — this gate prevents taps from being miscounted between fingers.
-5. After the last finger, the **Compare** chart updates so you can compare each finger's **accuracy** and **precision** (toggle the metric).
+5. After the last finger, the **Compare** chart updates so you can compare the fingers — switch the **Metric** (offset, precision, …), or press **Expand all** to see every metric at once. Use **Per finger ↗** to chart how each finger has changed across earlier tests too.
 
 Each finger's taps are saved as a tagged session, so they also flow into Progress and Compare history.
 
@@ -141,13 +141,25 @@ Every saved session is tagged with the **Hand** (Left/Right) and **Finger** (Thu
 
 The **Compare fingers** panel shows a bar chart grouped by hand+finger (e.g. "R Index", "L Index"; right hand = blue, left hand = green). Pick what to compare with the **Metric** dropdown:
 
-- **Accuracy %** (higher is better)
+- **Offset px** (lower is better) — *default*
 - **Precision: spread px** (lower is better)
-- **Offset px** (lower is better)
 - **Hardness %**
 - **Contact ms**
+- **Accuracy %** (higher is better)
+
+**Offset px** is the default and **Accuracy %** is last on purpose: the two measure much the same thing (how close you land to the dot), but accuracy % is *relative* to the chosen target radius — change the circle size and the number changes — whereas offset is an absolute pixel distance that's comparable across any setup.
 
 Each bar is the average across all that profile's saved sessions for that finger. The **Finger Test** mode is the quickest way to populate this fairly (same number of taps per finger in one sitting).
+
+### Expand all (see every metric at once)
+Press **Expand all** in the panel header to swap the single selectable chart for a stack of **small-multiple charts — one per metric** (offset, precision, hardness, contact ms, accuracy), all sharing the same finger groups. This lets you read every metric side-by-side without flipping the dropdown. Press **Collapse** to return to the single-chart view. (Each metric gets its own chart rather than being crammed onto one axis, because the metrics have incompatible scales — px vs % vs ms.)
+
+### Per-finger history over time
+Press **Per finger ↗** in the **Progress (saved sessions)** panel header to open the **history modal**. It plots **one line per hand+finger across your saved-session timeline**, so you can see whether a given finger is genuinely improving — e.g. its **offset** or **precision** trending downward — over many sessions, not just its current average.
+
+- The **Metric** dropdown (defaults to **Offset px**; the same five metrics as Compare) switches what the lines show.
+- The x-axis is the chronological run of saved sessions (dated/timed); each finger's points are connected across the sessions of *other* fingers in between, so its own trend stays readable.
+- Close the modal with the **✕**, by clicking outside it, or with **Esc**.
 
 ---
 
@@ -171,6 +183,7 @@ The header holds Profile, Hand, Finger, Mode, the calibration badge, and (in acc
   - *Calibration:* press count and max-area readouts.
 - **Per-tap charts** (sidebar): contact area and contact time per tap. Each has a **2× last** button that snaps the y-axis to twice the most recent tap's value (a one-time zoom); press again for auto-scale.
 - **Distance from dot** chart *(accuracy/test)*: pure offset distance per tap.
+- **Rolling precision** chart *(accuracy/test)*: the **spread of the last 10 taps** (their mean distance from their own moving centroid, in px) plotted per tap — **lower = tighter/more consistent**. It uses the same definition as the per-session "precision" metric, but as a moving window, so you can watch your consistency tighten or drift within a run. The line begins once there are at least two taps.
 - **Scatter** *(accuracy/test)*: tap positions relative to the dot, latest highlighted.
 - **Progress** chart: average accuracy / hardness / contact-time across your saved sessions over time. Point labels include the **time** as well as the date, so multiple sessions on the same day are distinguishable. Sessions missing a metric (e.g. tap-only sessions have no accuracy) connect across the gap rather than breaking the line.
 - **Compare** chart: see [above](#comparing-fingers-and-hands).
@@ -253,6 +266,15 @@ README.md     This document
 ```
 
 Dependencies: **Chart.js** (via CDN) for the charts; fonts (IBM Plex) via Google Fonts. Everything else is vanilla HTML/CSS/JS.
+
+---
+
+## Recent changes (design + analysis update)
+
+- **iPad / Safari tap-box fix.** After a layout redesign, the tap box rendered **stretched** on iPad Safari, the feedback dots appeared **offset and oval**, and taps only registered near the centre hint text. Cause: the canvas was sized with CSS `aspect-ratio` / `width:auto`, which WebKit resolves from the canvas's *intrinsic* (attribute) size — the very size the script rewrites each layout — so the displayed size and the drawing buffer drifted apart. The canvas is now sized to an **explicit square in JavaScript**, keeping the display size, drawing buffer, and hit-region in lockstep across Safari and Chrome.
+- **Rolling-precision chart** added in Accuracy/Test modes — the spread of the last 10 taps per tap, so consistency is visible live (see [Charts](#charts-and-visualizations)).
+- **Compare fingers — "Expand all"** shows every metric at once as small multiples, and the metric order now leads with **Offset px** (default) and ends with **Accuracy %** (see [Comparing fingers and hands](#comparing-fingers-and-hands)).
+- **Per-finger history modal** (**Per finger ↗**) charts how each finger's offset/precision change across saved sessions over time.
 
 ---
 
