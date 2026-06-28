@@ -119,12 +119,14 @@ input[type=range] { width: 140px; accent-color: var(--accent); height: 36px; }
   min-height: 0;
   background: radial-gradient(circle at 50% 40%, #131a22 0%, var(--bg) 70%);
 }
+/* Size is driven entirely by layout() in JS (explicit px width/height).
+   Do NOT use aspect-ratio / width:auto here: on a <canvas> (a replaced
+   element) WebKit/Safari resolves the rendered size from the intrinsic
+   width/height attributes — which JS rewrites every layout — instead of
+   honoring aspect-ratio, producing a stretched box, oval dots, and a
+   hit-region that no longer matches what's drawn. */
 #board {
-  height: 100%;
-  width: auto;
-  aspect-ratio: 1 / 1;
-  max-height: 460px;
-  max-width: 100%;
+  display: block;
   touch-action: none;
   border-radius: 12px;
   cursor: crosshair;
@@ -244,6 +246,32 @@ input[type=number] {
 .test-overlay p { font-size: 18px; line-height: 1.4; max-width: 400px; margin: 0; color: var(--text); font-weight: 500; }
 .test-overlay .btn { font-size: 16px; padding: 12px 28px; min-height: 48px; }
 
+/* ---------- Modal ---------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(5, 8, 11, 0.72);
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  width: min(760px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-title { font-size: 15px; margin: 0; }
+.modal-chart { position: relative; flex: 1 1 auto; min-height: 340px; }
+
 /* Charts */
 .chart-head {
   display: flex; align-items: center; justify-content: space-between;
@@ -291,7 +319,6 @@ td:first-child, th:first-child { text-align: left; }
       "mid    side";
   }
   .canvas-wrap { height: 38vh; max-height: 340px; }
-  #board { max-height: 320px; }
   .mid-col { border-left: none; border-top: 1px solid var(--border); }
 }
 
@@ -308,7 +335,6 @@ td:first-child, th:first-child { text-align: left; }
     overflow: auto;
   }
   .canvas-wrap { height: 30vh; min-height: 190px; max-height: 260px; }
-  #board { max-height: 240px; }
   .sidebar { overflow: visible; border-left: none; border-top: 1px solid var(--border); }
   .mid-col { border-left: none; border-top: 1px solid var(--border); }
   .app-header { gap: 6px 10px; padding: 8px 10px; }

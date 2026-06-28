@@ -29,6 +29,10 @@
     testOverlay: $('testOverlay'), testOverlayText: $('testOverlayText'), testContinueBtn: $('testContinueBtn'),
     // compare
     compareMetric: $('compareMetric'), compareEmpty: $('compareEmpty'),
+    compareExpandBtn: $('compareExpandBtn'), compareSingle: $('compareSingle'), compareExpanded: $('compareExpanded'),
+    // per-finger history modal
+    historyBtn: $('historyBtn'), historyModal: $('historyModal'), historyCloseBtn: $('historyCloseBtn'),
+    historyMetric: $('historyMetric'), historyEmpty: $('historyEmpty'),
     // live cards
     mTaps: $('mTaps'), mArea: $('mArea'), mHardness: $('mHardness'),
     mContact: $('mContact'), mAccuracy: $('mAccuracy'), mOffset: $('mOffset'),
@@ -42,6 +46,7 @@
     // charts
     scatterBox: $('scatterBox'),
     offsetBox: $('offsetBox'),
+    precisionBox: $('precisionBox'),
     analysisTitle: $('analysisTitle'),
     areaScaleBtn: $('areaScaleBtn'),
     timeScaleBtn: $('timeScaleBtn'),
@@ -102,13 +107,27 @@
   const actx = aCanvas.getContext('2d');
   let aW = 0, aH = 0;
 
+  // Largest CSS-px side the tap box is ever allowed to grow to (was #board max-height).
+  const BOARD_MAX = 460;
+
   function layout() {
     dpr = window.devicePixelRatio || 1;
-    const r = board.getBoundingClientRect();
-    board.width = Math.round(r.width * dpr);
-    board.height = Math.round(r.height * dpr);
+    // Derive a definite square from the wrapper's content box rather than
+    // letting CSS size the canvas. A <canvas> is a replaced element, so
+    // aspect-ratio / width:auto are resolved from its intrinsic (attribute)
+    // size in some engines (Safari), which we rewrite every layout — that
+    // feedback loop is what stretched the box and skewed the dots.
+    const wrap = board.parentElement;
+    const cs = getComputedStyle(wrap);
+    const availW = wrap.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const availH = wrap.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    const side = Math.max(0, Math.min(availW, availH, BOARD_MAX));
+    board.style.width = side + 'px';
+    board.style.height = side + 'px';
+    board.width = Math.round(side * dpr);
+    board.height = Math.round(side * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const W = r.width, H = r.height;
+    const W = side, H = side;
     const m = Math.max(16, Math.min(W, H) * 0.06);
     box = { x: m, y: m, width: W - 2 * m, height: H - 2 * m };
     dot = { x: box.x + box.width / 2, y: box.y + box.height / 2, r: 14 };
@@ -523,7 +542,7 @@
   }
 
   // ---------- Charts ----------
-  let areaChart, timeChart, scatterChart, offsetChart, progressChart, compareChart;
+  let areaChart, timeChart, scatterChart, offsetChart, precisionChart, progressChart, compareChart;
   const chartFont = { color: '#8b98a5' };
   const grid = { color: 'rgba(255,255,255,0.06)' };
 
@@ -570,6 +589,13 @@
       data: { labels: [], datasets: [{ label: 'Distance', data: [], borderColor: '#2ea043', backgroundColor: 'rgba(46,160,67,.15)', tension: .25, pointRadius: 2, fill: true }] },
       options: baseOpts('Distance from dot (px)'),
     });
+    // Rolling precision: spread (mean distance from centroid) of the last ≤10 taps.
+    // Same definition as the per-session "precision" metric, but as a moving window.
+    precisionChart = new Chart($('precisionChart'), {
+      type: 'line',
+      data: { labels: [], datasets: [{ label: 'Precision', data: [], borderColor: '#a371f7', backgroundColor: 'rgba(163,113,247,.15)', tension: .25, pointRadius: 2, fill: true, spanGaps: true }] },
+      options: baseOpts('Precision: spread of last 10 (px)'),
+    });
     progressChart = new Chart($('progressChart'), {
       type: 'line',
       data: { labels: [], datasets: [
@@ -608,27 +634,154 @@
       : m === 'hard' ? sum.avgHardness
       : sum.avgContactMs;
   }
-  function renderCompare() {
-    const m = els.compareMetric.value;
+  // Metrics shown in the compare panel. Order = both the <select> order and the
+  // top-to-bottom order of the "Expand all" small-multiples (offset first since
+  // it's an absolute px measure; accuracy % last as it's relative to circle size).
+  const COMPARE_METRICS = [
+    { key: 'off', label: 'Offset px (lower better)' },
+    { key: 'prec', label: 'Precision: spread px (lower better)' },
+    { key: 'hard', label: 'Hardness %' },
+    { key: 'ms', label: 'Contact ms' },
+    { key: 'acc', label: 'Accuracy % (higher better)' },
+  ];
+  let expandedCharts = null, compareExpanded = false;
+
+  // Group saved sessions by hand+finger (e.g. "R Index"), sorted hand then finger.
+  function compareGroups() {
     const groups = {};
     for (const s of activeProfile().sessions) {
       if (!s.hand || !s.finger) continue;
-      const v = metricVal(s.summary, m);
-      if (v == null) continue;
-      const k = `${s.hand[0]} ${s.finger}`; // e.g. "R Index"
-      (groups[k] ||= { sum: 0, n: 0, hand: s.hand, finger: s.finger });
-      groups[k].sum += v; groups[k].n++;
+      const k = `${s.hand[0]} ${s.finger}`;
+      (groups[k] ||= { hand: s.hand, finger: s.finger, sessions: [] }).sessions.push(s);
     }
     const keys = Object.keys(groups).sort((a, b) => {
       const ga = groups[a], gb = groups[b];
       if (ga.hand !== gb.hand) return ga.hand < gb.hand ? -1 : 1;
       return FINGERS.indexOf(ga.finger) - FINGERS.indexOf(gb.finger);
     });
-    compareChart.data.labels = keys;
-    compareChart.data.datasets[0].data = keys.map(k => round1(groups[k].sum / groups[k].n));
-    compareChart.data.datasets[0].backgroundColor = keys.map(k => groups[k].hand === 'Right' ? '#2f81f7' : '#2ea043');
-    compareChart.update();
+    return { groups, keys };
+  }
+  function metricAvg(group, m) {
+    let sum = 0, n = 0;
+    for (const s of group.sessions) { const v = metricVal(s.summary, m); if (v == null) continue; sum += v; n++; }
+    return n ? round1(sum / n) : null;
+  }
+  function fillCompareChart(chart, keys, groups, m) {
+    chart.data.labels = keys;
+    chart.data.datasets[0].data = keys.map(k => metricAvg(groups[k], m));
+    chart.data.datasets[0].backgroundColor = keys.map(k => groups[k].hand === 'Right' ? '#2f81f7' : '#2ea043');
+    chart.update();
+  }
+  function buildExpandedCharts() {
+    els.compareExpanded.innerHTML = '';
+    expandedCharts = {};
+    for (const mt of COMPARE_METRICS) {
+      const head = document.createElement('div');
+      head.className = 'chart-head';
+      head.innerHTML = `<span>${mt.label}</span>`;
+      const box = document.createElement('div');
+      box.className = 'chart-box';
+      const cv = document.createElement('canvas');
+      box.appendChild(cv);
+      els.compareExpanded.append(head, box);
+      expandedCharts[mt.key] = new Chart(cv, {
+        type: 'bar',
+        data: { labels: [], datasets: [{ data: [], backgroundColor: [] }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: { legend: { display: false }, tooltip: { enabled: true } },
+          scales: { x: { ticks: chartFont, grid }, y: { ticks: chartFont, grid, beginAtZero: true } },
+        },
+      });
+    }
+  }
+  function toggleCompareExpand() {
+    compareExpanded = !compareExpanded;
+    els.compareExpandBtn.textContent = compareExpanded ? 'Collapse' : 'Expand all';
+    els.compareExpandBtn.classList.toggle('btn-primary', compareExpanded);
+    els.compareSingle.hidden = compareExpanded;
+    els.compareExpanded.hidden = !compareExpanded;
+    if (compareExpanded && !expandedCharts) buildExpandedCharts();
+    renderCompare();
+  }
+  function renderCompare() {
+    const { groups, keys } = compareGroups();
+    fillCompareChart(compareChart, keys, groups, els.compareMetric.value);
+    if (compareExpanded && expandedCharts) {
+      for (const mt of COMPARE_METRICS) fillCompareChart(expandedCharts[mt.key], keys, groups, mt.key);
+    }
     els.compareEmpty.hidden = keys.length > 0;
+  }
+
+  // ---------- Per-finger history modal ----------
+  // One line per hand+finger across the saved-session timeline, so you can see
+  // whether a given finger's offset / precision is trending down over time.
+  let historyChart = null;
+  const HISTORY_PALETTE = ['#2f81f7', '#2ea043', '#d29922', '#f85149', '#a371f7', '#56d4dd', '#e879f9', '#f0883e', '#39d353', '#db61a2'];
+
+  function buildHistoryChart() {
+    historyChart = new Chart($('historyChart'), {
+      type: 'line',
+      data: { labels: [], datasets: [] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: { legend: { display: true, labels: { color: '#8b98a5', boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          x: { ticks: { ...chartFont, maxRotation: 0, autoSkip: true }, grid },
+          y: { title: { display: true, text: '', color: '#8b98a5' }, ticks: chartFont, grid, beginAtZero: true },
+        },
+      },
+    });
+  }
+
+  function renderHistory() {
+    const m = els.historyMetric.value;
+    const sessions = activeProfile().sessions
+      .filter(s => s.hand && s.finger && metricVal(s.summary, m) != null)
+      .slice()
+      .sort((a, b) => new Date(a.endedAt) - new Date(b.endedAt));
+    const labels = sessions.map(s =>
+      new Date(s.endedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
+    // Each finger gets a value at the sessions that belong to it; null elsewhere
+    // (spanGaps connects a finger's own points across the shared timeline).
+    const groups = {}, order = [];
+    sessions.forEach((s, i) => {
+      const k = `${s.hand[0]} ${s.finger}`;
+      if (!groups[k]) { groups[k] = { hand: s.hand, finger: s.finger, data: new Array(sessions.length).fill(null) }; order.push(k); }
+      groups[k].data[i] = round1(metricVal(s.summary, m));
+    });
+    const keys = order.sort((a, b) => {
+      const ga = groups[a], gb = groups[b];
+      if (ga.hand !== gb.hand) return ga.hand < gb.hand ? -1 : 1;
+      return FINGERS.indexOf(ga.finger) - FINGERS.indexOf(gb.finger);
+    });
+    historyChart.data.labels = labels;
+    historyChart.data.datasets = keys.map((k, idx) => {
+      const c = HISTORY_PALETTE[idx % HISTORY_PALETTE.length];
+      return { label: k, data: groups[k].data, borderColor: c, backgroundColor: c, tension: .25, pointRadius: 3, spanGaps: true, fill: false };
+    });
+    historyChart.options.scales.y.title.text = (COMPARE_METRICS.find(x => x.key === m) || {}).label || '';
+    historyChart.update();
+    els.historyEmpty.hidden = sessions.length > 0;
+  }
+
+  function openHistory() {
+    els.historyModal.hidden = false;
+    if (!historyChart) buildHistoryChart();
+    renderHistory();
+    // Canvas was display:none until now; let it pick up the real size.
+    requestAnimationFrame(() => historyChart.resize());
+  }
+  function closeHistory() { els.historyModal.hidden = true; }
+
+  // Spread (mean distance from centroid, px) of the last ≤10 taps. Needs ≥2
+  // taps to define a spread; returns null otherwise so the line starts as a gap.
+  function rollingPrecision() {
+    const w = state.taps.slice(-10);
+    if (w.length < 2) return null;
+    const cx = w.reduce((s, t) => s + t.x, 0) / w.length;
+    const cy = w.reduce((s, t) => s + t.y, 0) / w.length;
+    return round1(w.reduce((s, t) => s + Math.hypot(t.x - cx, t.y - cy), 0) / w.length);
   }
 
   function pushCharts() {
@@ -648,6 +801,9 @@
       offsetChart.data.labels.push(t.id);
       offsetChart.data.datasets[0].data.push(round1(t.offset));
       offsetChart.update();
+      precisionChart.data.labels.push(t.id);
+      precisionChart.data.datasets[0].data.push(rollingPrecision());
+      precisionChart.update();
     }
   }
 
@@ -674,7 +830,7 @@
   }
 
   function resetCharts() {
-    for (const c of [areaChart, timeChart, offsetChart]) { c.data.labels = []; c.data.datasets[0].data = []; c.update(); }
+    for (const c of [areaChart, timeChart, offsetChart, precisionChart]) { c.data.labels = []; c.data.datasets[0].data = []; c.update(); }
     scatterChart.data.datasets[0].data = [];
     scatterChart.data.datasets[1].data = [];
     scatterChart.update();
@@ -910,9 +1066,9 @@
   function finishTest() {
     state.test.phase = 'done';
     endTestUI();
-    els.compareMetric.value = 'acc';
+    els.compareMetric.value = 'off';
     renderCompare();
-    els.testOverlayText.textContent = 'Test complete! Compare accuracy & precision below — switch the metric to see each.';
+    els.testOverlayText.textContent = 'Test complete! Compare fingers below — switch the metric, or hit "Expand all" to see every metric at once.';
     els.testOverlay.hidden = false;
     els.modeHint.textContent = '';
     els.testStatus.textContent = 'Complete';
@@ -937,6 +1093,7 @@
     els.testPanel.hidden = !testMode;
     els.scatterBox.hidden = !acc;
     els.offsetBox.hidden = !acc;
+    els.precisionBox.hidden = !acc;
     els.cardAccuracy.style.display = acc ? '' : 'none';
     els.cardOffset.style.display = acc ? '' : 'none';
     els.analysisTitle.textContent = acc ? 'Live accuracy' : calMode ? 'Calibration' : 'Live tap';
@@ -1070,6 +1227,13 @@
 
     // comparison metric
     els.compareMetric.addEventListener('change', renderCompare);
+    els.compareExpandBtn.addEventListener('click', toggleCompareExpand);
+
+    els.historyBtn.addEventListener('click', openHistory);
+    els.historyCloseBtn.addEventListener('click', closeHistory);
+    els.historyMetric.addEventListener('change', renderHistory);
+    els.historyModal.addEventListener('click', (e) => { if (e.target === els.historyModal) closeHistory(); });
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !els.historyModal.hidden) closeHistory(); });
 
     // mode / profile
     els.modeSelect.addEventListener('change', (e) => setMode(e.target.value));

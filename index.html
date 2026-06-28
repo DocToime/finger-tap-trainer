@@ -154,18 +154,23 @@
 
       <!-- Comparison across fingers/hands -->
       <div class="panel">
-        <h2 class="panel-title">Compare fingers</h2>
-        <label class="field">
-          <span class="field-label">Metric</span>
-          <select id="compareMetric" aria-label="Comparison metric">
-            <option value="acc">Accuracy % (higher better)</option>
-            <option value="prec">Precision: spread px (lower better)</option>
-            <option value="off">Offset px (lower better)</option>
-            <option value="hard">Hardness %</option>
-            <option value="ms">Contact ms</option>
-          </select>
-        </label>
-        <div class="chart-box"><canvas id="compareChart"></canvas></div>
+        <h2 class="panel-title">Compare fingers
+          <button id="compareExpandBtn" class="btn btn-ghost btn-xs">Expand all</button>
+        </h2>
+        <div id="compareSingle">
+          <label class="field">
+            <span class="field-label">Metric</span>
+            <select id="compareMetric" aria-label="Comparison metric">
+              <option value="off">Offset px (lower better)</option>
+              <option value="prec">Precision: spread px (lower better)</option>
+              <option value="hard">Hardness %</option>
+              <option value="ms">Contact ms</option>
+              <option value="acc">Accuracy % (higher better)</option>
+            </select>
+          </label>
+          <div class="chart-box"><canvas id="compareChart"></canvas></div>
+        </div>
+        <div id="compareExpanded" hidden></div>
         <p id="compareEmpty" class="muted small">Save sessions tagged with hand + finger to compare.</p>
       </div>
 
@@ -177,12 +182,15 @@
         <div class="chart-head"><span>Contact time</span><button id="timeScaleBtn" class="btn btn-ghost btn-xs">2× last</button></div>
         <div class="chart-box"><canvas id="timeChart"></canvas></div>
         <div class="chart-box" id="offsetBox" hidden><canvas id="offsetChart"></canvas></div>
+        <div class="chart-box" id="precisionBox" hidden><canvas id="precisionChart"></canvas></div>
         <div class="chart-box" id="scatterBox" hidden><canvas id="scatterChart"></canvas></div>
       </div>
 
       <!-- Cross-session progress -->
       <div class="panel">
-        <h2 class="panel-title">Progress (saved sessions)</h2>
+        <h2 class="panel-title">Progress (saved sessions)
+          <button id="historyBtn" class="btn btn-ghost btn-xs">Per finger ↗</button>
+        </h2>
         <div class="chart-box"><canvas id="progressChart"></canvas></div>
         <p id="progressEmpty" class="muted small">No saved sessions yet for this profile.</p>
       </div>
@@ -203,5 +211,27 @@
 
     </aside>
   </main>
+
+  <!-- Per-finger history modal: how each finger's metrics change over time -->
+  <div id="historyModal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Per-finger progress over time">
+      <div class="modal-head">
+        <h2 class="modal-title">Per-finger progress over time</h2>
+        <button id="historyCloseBtn" class="btn btn-ghost btn-xs" aria-label="Close">✕</button>
+      </div>
+      <label class="field">
+        <span class="field-label">Metric</span>
+        <select id="historyMetric" aria-label="History metric">
+          <option value="off">Offset px (lower better)</option>
+          <option value="prec">Precision: spread px (lower better)</option>
+          <option value="hard">Hardness %</option>
+          <option value="ms">Contact ms</option>
+          <option value="acc">Accuracy % (higher better)</option>
+        </select>
+      </label>
+      <div class="modal-chart"><canvas id="historyChart"></canvas></div>
+      <p id="historyEmpty" class="muted small">Save sessions tagged with hand + finger to see progress here.</p>
+    </div>
+  </div>
 </body>
 </html>
