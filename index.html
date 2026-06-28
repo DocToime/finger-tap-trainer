@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Finger Tap Precision Trainer</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title">Finger Tap Trainer</h1>
+
+    <div class="header-group">
+      <label class="field">
+        <span class="field-label">Profile</span>
+        <select id="profileSelect" aria-label="Active profile"></select>
+      </label>
+      <button id="newProfileBtn" class="btn btn-ghost" title="New profile">+ New</button>
+      <button id="renameProfileBtn" class="btn btn-ghost" title="Rename profile">Rename</button>
+    </div>
+
+    <div class="header-group">
+      <label class="field">
+        <span class="field-label">Mode</span>
+        <select id="modeSelect" aria-label="Mode">
+          <option value="tap">Tap Analysis</option>
+          <option value="accuracy">Accuracy</option>
+          <option value="calibration">Calibration</option>
+        </select>
+      </label>
+      <span id="calBadge" class="badge badge-warn" title="Calibration status">Uncalibrated</span>
+    </div>
+
+    <label class="field" id="targetField" hidden>
+      <span class="field-label">Target radius: <strong id="targetVal">–</strong> px</span>
+      <input id="targetRadius" type="range" min="20" max="400" step="5" aria-label="Accuracy target radius" />
+    </label>
+  </header>
+
+  <main class="app-main">
+    <!-- Canvas / interaction area -->
+    <section class="canvas-wrap" aria-label="Tap target area">
+      <canvas id="board"></canvas>
+      <p id="modeHint" class="mode-hint"></p>
+    </section>
+
+    <!-- Middle column: live analysis viz + always-visible taps table -->
+    <section class="mid-col">
+      <div class="panel analysis-panel">
+        <h2 class="panel-title" id="analysisTitle">Live</h2>
+        <div class="analysis-canvas-wrap"><canvas id="analysisCanvas"></canvas></div>
+      </div>
+      <div class="panel table-panel">
+        <h2 class="panel-title">Taps <button id="showAllBtn" class="btn btn-ghost btn-xs">Show all</button></h2>
+        <div class="table-wrap">
+          <table id="tapTable">
+            <thead>
+              <tr><th>#</th><th>Area</th><th>%</th><th>ms</th><th>Off</th><th>Acc%</th><th>X</th><th>Y</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <!-- Live metric cards -->
+      <div class="panel">
+        <h2 class="panel-title">Live</h2>
+        <div class="cards">
+          <div class="card"><span class="card-val" id="mTaps">0</span><span class="card-lbl">Taps</span></div>
+          <div class="card"><span class="card-val" id="mArea">–</span><span class="card-lbl">Area (px²)</span></div>
+          <div class="card"><span class="card-val" id="mHardness">–</span><span class="card-lbl">Hardness %</span></div>
+          <div class="card"><span class="card-val" id="mContact">–</span><span class="card-lbl">Contact (ms)</span></div>
+          <div class="card" id="cardAccuracy"><span class="card-val" id="mAccuracy">–</span><span class="card-lbl">Accuracy %</span></div>
+          <div class="card" id="cardOffset"><span class="card-val" id="mOffset">–</span><span class="card-lbl">Offset (px)</span></div>
+        </div>
+      </div>
+
+      <!-- Session controls -->
+      <div class="panel">
+        <h2 class="panel-title">Session</h2>
+        <div class="controls">
+          <button id="startBtn" class="btn btn-primary">Start</button>
+          <button id="pauseBtn" class="btn" disabled>Pause</button>
+          <button id="saveBtn" class="btn btn-accent" disabled>Stop &amp; Save</button>
+          <button id="resetBtn" class="btn btn-ghost">Reset</button>
+        </div>
+        <p id="sessionStatus" class="session-status">Idle</p>
+      </div>
+
+      <!-- Calibration panel (only shown in calibration mode) -->
+      <div class="panel" id="calPanel" hidden>
+        <h2 class="panel-title">Calibration</h2>
+        <p class="muted small">Press as hard as you can, several times, inside the box. We capture your maximum contact area to normalize hardness.</p>
+        <div class="cards">
+          <div class="card"><span class="card-val" id="calPresses">0</span><span class="card-lbl">Presses</span></div>
+          <div class="card"><span class="card-val" id="calMaxArea">–</span><span class="card-lbl">Max area</span></div>
+        </div>
+        <div class="controls">
+          <button id="calSaveBtn" class="btn btn-accent" disabled>Save calibration</button>
+          <button id="calClearBtn" class="btn btn-ghost">Clear</button>
+        </div>
+      </div>
+
+      <!-- Live charts -->
+      <div class="panel">
+        <h2 class="panel-title">Per-tap</h2>
+        <div class="chart-head"><span>Contact area</span><button id="areaScaleBtn" class="btn btn-ghost btn-xs">2× last</button></div>
+        <div class="chart-box"><canvas id="areaChart"></canvas></div>
+        <div class="chart-head"><span>Contact time</span><button id="timeScaleBtn" class="btn btn-ghost btn-xs">2× last</button></div>
+        <div class="chart-box"><canvas id="timeChart"></canvas></div>
+        <div class="chart-box" id="offsetBox" hidden><canvas id="offsetChart"></canvas></div>
+        <div class="chart-box" id="scatterBox" hidden><canvas id="scatterChart"></canvas></div>
+      </div>
+
+      <!-- Cross-session progress -->
+      <div class="panel">
+        <h2 class="panel-title">Progress (saved sessions)</h2>
+        <div class="chart-box"><canvas id="progressChart"></canvas></div>
+        <p id="progressEmpty" class="muted small">No saved sessions yet for this profile.</p>
+      </div>
+
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <span class="muted small" id="capNote"></span>
+    <div class="footer-actions">
+      <button id="exportCsvBtn" class="btn btn-ghost btn-xs">Export CSV</button>
+      <button id="exportJsonBtn" class="btn btn-ghost btn-xs">Export JSON</button>
+      <button id="copyBtn" class="btn btn-ghost btn-xs">Copy metrics</button>
+      <button id="exportProfileBtn" class="btn btn-ghost btn-xs">Export profile</button>
+      <button id="importProfileBtn" class="btn btn-ghost btn-xs">Import profile</button>
+      <input id="importFile" type="file" accept="application/json" hidden />
+    </div>
+  </footer>
+</body>
+</html>
