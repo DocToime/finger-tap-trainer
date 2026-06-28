@@ -85,6 +85,7 @@
     showAll: false,
     active: null,         // in-progress tap being sampled
     calPresses: [],       // calibration presses (areas)
+    calPressPeaks: [],    // calibration presses (pressure peaks, where reported)
     hand: 'Right',        // tag for saved sessions
     finger: 'Index',
     test: null,           // guided finger-test run (see startTest)
@@ -175,13 +176,20 @@
 
     // label
     ctx.fillStyle = 'rgba(139,152,165,0.9)';
-    ctx.font = '14px -apple-system, sans-serif';
     ctx.textAlign = 'left';
     const label = state.mode === 'calibration'
       ? 'Press AS HARD AS YOU CAN inside this box'
       : accLike()
         ? 'Tap the dot as accurately as you can'
         : 'Tap anywhere inside this box';
+    // Shrink font until the label fits the box width on narrow viewports.
+    let fontPx = 14;
+    const maxLabelW = box.width - 24;
+    ctx.font = `${fontPx}px -apple-system, sans-serif`;
+    while (fontPx > 9 && ctx.measureText(label).width > maxLabelW) {
+      fontPx -= 1;
+      ctx.font = `${fontPx}px -apple-system, sans-serif`;
+    }
     ctx.fillText(label, box.x + 12, box.y + 22);
 
     // accuracy dot
@@ -460,6 +468,7 @@
   // ---------- Calibration ----------
   function handleCalibrationPress(tap) {
     state.calPresses.push(tap.areaPeak);
+    state.calPressPeaks.push(tap.pressurePeak || 0);
     els.calPresses.textContent = state.calPresses.length;
     const mx = Math.max(...state.calPresses);
     els.calMaxArea.textContent = Math.round(mx);
@@ -471,9 +480,13 @@
     const sorted = [...state.calPresses].sort((a, b) => b - a);
     const top = sorted.slice(0, Math.max(1, Math.ceil(sorted.length / 2)));
     const maxArea = top.reduce((s, v) => s + v, 0) / top.length;
+    // Capture max reported pressure too; stays 0 (→ pressureNorm null) on
+    // devices that don't report pressure, so behaviour is unchanged there.
+    const pressures = state.calPressPeaks.filter(p => p > 0);
+    const maxPressure = pressures.length ? Math.max(...pressures) : 0;
     activeProfile().calibration = {
       maxArea,
-      maxPressure: 0, // pressure peak often unreliable; area is primary
+      maxPressure,
       calibratedAt: new Date().toISOString(),
     };
     saveStore();
@@ -482,6 +495,7 @@
   }
   function clearCalibration() {
     state.calPresses = [];
+    state.calPressPeaks = [];
     els.calPresses.textContent = '0';
     els.calMaxArea.textContent = '–';
     els.calSaveBtn.disabled = true;
@@ -559,9 +573,9 @@
     progressChart = new Chart($('progressChart'), {
       type: 'line',
       data: { labels: [], datasets: [
-        { label: 'Avg accuracy %', data: [], borderColor: '#2ea043', tension: .25, pointRadius: 3 },
-        { label: 'Avg hardness %', data: [], borderColor: '#f85149', tension: .25, pointRadius: 3 },
-        { label: 'Avg contact ms', data: [], borderColor: '#d29922', tension: .25, pointRadius: 3, yAxisID: 'y1' },
+        { label: 'Avg accuracy %', data: [], borderColor: '#2ea043', tension: .25, pointRadius: 3, spanGaps: true },
+        { label: 'Avg hardness %', data: [], borderColor: '#f85149', tension: .25, pointRadius: 3, spanGaps: true },
+        { label: 'Avg contact ms', data: [], borderColor: '#d29922', tension: .25, pointRadius: 3, yAxisID: 'y1', spanGaps: true },
       ] },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
@@ -674,7 +688,8 @@
     const sessions = activeProfile().sessions;
     const labels = [], acc = [], hard = [], ms = [];
     for (const s of sessions) {
-      labels.push(new Date(s.endedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
+      // Include time so multiple sessions on the same day are distinguishable.
+      labels.push(new Date(s.endedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
       acc.push(s.summary.avgAccuracy);
       hard.push(s.summary.avgHardness);
       ms.push(s.summary.avgContactMs);
@@ -765,7 +780,7 @@
     return session;
   }
   function saveSession() {
-    if (!state.taps.length) { resetSession(); return; }
+    if (!state.taps.length) { setStatus('Nothing to save'); resetSession(); return; }
     const session = commitSession(state.taps, state.mode, state.hand, state.finger);
     renderProgress(); renderCompare();
     setStatus(`Saved: ${session.summary.count} taps (${state.hand} ${state.finger})`);
@@ -781,6 +796,14 @@
     ['mTaps','mArea','mHardness','mContact','mAccuracy','mOffset'].forEach(k => {
       els[k].textContent = k === 'mTaps' ? '0' : '–';
     });
+  }
+  // Reset button: clear data, then keep recording in auto-record modes so
+  // status/buttons stay consistent with the auto-start behaviour on mode entry.
+  function onResetClick() {
+    const auto = state.mode === 'tap' || state.mode === 'accuracy';
+    resetSession();
+    if (auto) startSession();
+    else setStatus('Idle');
   }
 
   // ---------- Finger test (guided, multi-finger) ----------
@@ -929,6 +952,7 @@
     if (calMode) clearCalibration();
     // tap/accuracy auto-record; test waits for Start test
     if (normalSession) startSession();
+    else setStatus(calMode ? 'Calibration — press hard inside the box' : 'Finger Test — select fingers and Start');
     draw();
     drawAnalysis();
   }
@@ -957,13 +981,15 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function exportCsv() {
-    const cols = ['id','contactMs','x','y','wPeak','hPeak','areaPeak','areaMean','pressurePeak','pressureMean','areaNorm','pressureNorm','offset','accuracyPct'];
+    if (!state.taps.length) { setStatus('Nothing to export'); return; }
+    const cols =['id','contactMs','x','y','wPeak','hPeak','areaPeak','areaMean','pressurePeak','pressureMean','areaNorm','pressureNorm','offset','accuracyPct'];
     const head = cols.join(',');
     const body = state.taps.map(t => cols.map(c => t[c] == null ? '' : (typeof t[c] === 'number' ? round1(t[c]) : t[c])).join(',')).join('\n');
     download(`taps-${Date.now()}.csv`, 'text/csv', head + '\n' + body);
   }
   function exportJson() {
-    const out = { profile: activeProfile().name, mode: state.mode, summary: summarize(state.taps), taps: state.taps };
+    if (!state.taps.length) { setStatus('Nothing to export'); return; }
+    const out ={ profile: activeProfile().name, mode: state.mode, summary: summarize(state.taps), taps: state.taps };
     download(`session-${Date.now()}.json`, 'application/json', JSON.stringify(out, null, 2));
   }
   async function copyMetrics() {
@@ -981,11 +1007,13 @@
     reader.onload = () => {
       try {
         const p = JSON.parse(reader.result);
-        if (!p || !p.name) throw new Error('bad');
+        if (!p || typeof p.name !== 'string' || !p.name) throw new Error('bad');
+        // Guard malformed data so the charts don't break on import.
+        if (!Array.isArray(p.sessions)) p.sessions = [];
         p.id = uid();
         store.profiles[p.id] = p;
         store.activeProfileId = p.id;
-        saveStore(); renderProfiles(); refreshCalBadge(); renderProgress(); resetSession();
+        saveStore(); renderProfiles(); refreshCalBadge(); renderProgress(); renderCompare(); resetSession();
         setStatus(`Imported profile "${p.name}"`);
       } catch { setStatus('Import failed: invalid file'); }
     };
@@ -1018,7 +1046,7 @@
     els.startBtn.addEventListener('click', startSession);
     els.pauseBtn.addEventListener('click', pauseSession);
     els.saveBtn.addEventListener('click', saveSession);
-    els.resetBtn.addEventListener('click', resetSession);
+    els.resetBtn.addEventListener('click', onResetClick);
 
     // calibration
     els.calSaveBtn.addEventListener('click', saveCalibration);

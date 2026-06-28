@@ -131,6 +131,7 @@ After calibration, every tap's **Hardness %** is shown relative to that maximum 
 - Calibration is **per profile** — switching profiles switches the calibration.
 - **Clear** removes it; the app still works but hardness shows raw-only ("–" for the %).
 - Recalibrate any time (e.g. for a different finger or user).
+- Calibration also records your **maximum reported pressure** (where the device exposes it), which drives the normalized-pressure export column. On devices that don't report pressure this stays empty, exactly as before — contact area remains the primary hardness signal.
 
 ---
 
@@ -171,7 +172,7 @@ The header holds Profile, Hand, Finger, Mode, the calibration badge, and (in acc
 - **Per-tap charts** (sidebar): contact area and contact time per tap. Each has a **2× last** button that snaps the y-axis to twice the most recent tap's value (a one-time zoom); press again for auto-scale.
 - **Distance from dot** chart *(accuracy/test)*: pure offset distance per tap.
 - **Scatter** *(accuracy/test)*: tap positions relative to the dot, latest highlighted.
-- **Progress** chart: average accuracy / hardness / contact-time across your saved sessions over time.
+- **Progress** chart: average accuracy / hardness / contact-time across your saved sessions over time. Point labels include the **time** as well as the date, so multiple sessions on the same day are distinguishable. Sessions missing a metric (e.g. tap-only sessions have no accuracy) connect across the gap rather than breaking the line.
 - **Compare** chart: see [above](#comparing-fingers-and-hands).
 
 ### Target radius
@@ -182,7 +183,8 @@ In Accuracy/Test modes a slider sets the **target radius** — the distance from
 ## Saving, progress, and data
 
 - **Start / Pause / Stop & Save / Reset** control a Tap or Accuracy session. Tap and Accuracy modes auto-start on entry; Calibration and Finger Test use their own flows.
-- **Stop & Save** stores the session (tagged with hand + finger) into the active profile and updates Progress and Compare.
+- **Reset** clears the current taps and charts. In Tap and Accuracy modes it then **keeps recording** (matching the auto-start behaviour), so you can immediately start a fresh run without pressing Start.
+- **Stop & Save** stores the session (tagged with hand + finger) into the active profile and updates Progress and Compare. Pressing it with no taps does nothing and reports *"Nothing to save"*.
 - The **Taps** table lists recent taps (last 50, with a **Show all** toggle). Columns: # · Area · % · ms · Off · Acc% · X · Y.
 - All saved data persists in the browser's **localStorage** under the key `tapTrainer.v1`, so it survives reloads on the same device/browser.
 
@@ -192,11 +194,11 @@ In Accuracy/Test modes a slider sets the **target radius** — the distance from
 
 Open the **Data & export** panel (collapsed at the bottom of the sidebar):
 
-- **Export CSV** — all taps in the current session with raw + computed columns.
-- **Export JSON** — the current session plus its summary (includes precision, accuracy, etc.).
+- **Export CSV** — all taps in the current session with raw + computed columns. (Disabled-effect: with no taps it reports *"Nothing to export"* instead of writing an empty file.)
+- **Export JSON** — the current session plus its summary (includes precision, accuracy, etc.). Also a no-op with the same message when there are no taps.
 - **Copy metrics** — copies the current session's summary to the clipboard.
 - **Export profile** — the whole active profile (calibration + all sessions) as JSON.
-- **Import profile** — load a previously exported profile JSON (added as a new profile). Useful for moving data between devices or backing it up, since localStorage can be cleared by the browser.
+- **Import profile** — load a previously exported profile JSON (added as a new profile). The file is lightly validated (must have a `name`; a missing or malformed session list is coerced to empty) so a bad file can't break the charts. On success, **Progress and Compare both refresh immediately**. Useful for moving data between devices or backing it up, since localStorage can be cleared by the browser.
 
 ---
 
@@ -251,6 +253,31 @@ README.md     This document
 ```
 
 Dependencies: **Chart.js** (via CDN) for the charts; fonts (IBM Plex) via Google Fonts. Everything else is vanilla HTML/CSS/JS.
+
+---
+
+## Recent changes (QA review fixes)
+
+Following an internal QA review (see `REVIEW.md`), these issues were fixed:
+
+- **Reset no longer leaves a misleading "Recording…" status.** In Tap/Accuracy modes, Reset now clears data and keeps recording so the status and Start/Pause/Stop buttons stay consistent; Calibration/Test return to an idle status.
+- **Importing a profile now refreshes the Compare chart** (previously it only refreshed Progress), and the imported file is lightly validated.
+- **Mode switches reset the session status** to a mode-appropriate message instead of leaving the previous one ("Saved…", "Calibrated…") on screen.
+- **Progress chart** connects across sessions that lack a metric (no more broken/gapped lines) and **labels include the time** so same-day sessions don't collide.
+- **The tap-box instruction label auto-shrinks** to fit narrow (phone) viewports instead of being clipped.
+- **Calibration captures maximum pressure** where the device reports it, so the normalized-pressure export column is populated on capable devices.
+- **Zero-tap guards:** Stop & Save and CSV/JSON export now report "Nothing to save/export" instead of saving/downloading empty data.
+- **Naming:** the browser tab title now matches the in-app header ("Finger Tap Trainer").
+
+### Known limitations / deferred
+
+These review suggestions are intentionally **not** in this revision — they're feature/design work rather than bug fixes, and are tracked for a future pass:
+
+- New/Rename profiles still use the browser `prompt()` dialog (awkward in some embedded browsers); no UI to **delete** a profile or individual sessions yet.
+- Switching profiles doesn't restore that profile's last-used hand/finger (only the global last-used values).
+- Accessibility: no keyboard alternative for the tap canvas and no ARIA live region announcing tap metrics; collapsed panels aren't `aria-hidden`.
+- Progress chart plots contact-ms on a secondary axis with no toggle/normalized view.
+- PRD modes not built in v1 (Trace Box Perimeter, Steady Hold, Free-Draw path drawing, sortable table, instant speed/path-length metrics) remain out of scope.
 
 ---
 
