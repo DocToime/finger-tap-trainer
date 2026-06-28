@@ -936,7 +936,13 @@
     return session;
   }
   function saveSession() {
-    if (!state.taps.length) { setStatus('Nothing to save'); resetSession(); return; }
+    if (!state.taps.length) {
+      const auto = state.mode === 'tap' || state.mode === 'accuracy';
+      resetSession();
+      if (auto) startSession();
+      setStatus('Nothing to save');
+      return;
+    }
     const session = commitSession(state.taps, state.mode, state.hand, state.finger);
     renderProgress(); renderCompare();
     setStatus(`Saved: ${session.summary.count} taps (${state.hand} ${state.finger})`);
