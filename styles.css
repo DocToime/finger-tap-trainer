@@ -15,6 +15,10 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must win over author display rules
+   (e.g. .test-overlay/.field set display, which would otherwise show them). */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
